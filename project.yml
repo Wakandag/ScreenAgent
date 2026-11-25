@@ -62,6 +62,21 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSBluetoothAlwaysUsageDescription: ScreenAgent talks to the ESP32 Agent board over Bluetooth to see the screen and move the pointer.
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconName: AppIcon
+            CFBundleIconFiles:
+              - AppIcon60x60
+              - AppIcon40x40
+              - AppIcon29x29
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconName: AppIcon
+            CFBundleIconFiles:
+              - AppIcon60x60
+              - AppIcon76x76
+              - AppIcon40x40
+              - AppIcon29x29
         UIBackgroundModes:
           - bluetooth-central
         ITSAppUsesNonExemptEncryption: false
