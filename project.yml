@@ -1,0 +1,77 @@
+name: ScreenAgent
+options:
+  developmentLanguage: en
+  bundleIdPrefix: com.screenagent
+  deploymentTarget:
+    iOS: "16.4"
+configFiles:
+  Debug: Config/Shared.xcconfig
+  Release: Config/Shared.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+    GCC_CXX_LANGUAGE_STANDARD: "gnu++17"
+    OTHER_LDFLAGS:
+      - "-force_load"
+      - "$(PROJECT_DIR)/libs/libggml-cpu.a"
+      - "-force_load"
+      - "$(PROJECT_DIR)/libs/libggml-base.a"
+      - "-llama"
+      - "-lggml"
+      - "-lggml-base"
+      - "-lggml-cpu"
+      - "-lc++"
+    LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/libs"
+    HEADER_SEARCH_PATHS:
+      - "$(PROJECT_DIR)/headers"
+      - "$(PROJECT_DIR)/llama.cpp/include"
+      - "$(PROJECT_DIR)/llama.cpp/ggml/src"
+      - "$(PROJECT_DIR)/llama.cpp/ggml/src/ggml-cpu"
+    SWIFT_INCLUDE_PATHS: "$(PROJECT_DIR)/headers"
+    SWIFT_OBJC_BRIDGING_HEADER: ""
+targets:
+  ScreenAgent:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "Resources/**"
+      - path: App/Resources
+        type: folder
+        buildPhase: resources
+        optional: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.screenagent.app
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: NO
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: ScreenAgent
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSBluetoothAlwaysUsageDescription: ScreenAgent talks to the ESP32 Agent board over Bluetooth to see the screen and move the pointer.
+        UIBackgroundModes:
+          - bluetooth-central
+        ITSAppUsesNonExemptEncryption: false
+schemes:
+  ScreenAgent:
+    build:
+      targets:
+        ScreenAgent: release
+    run:
+      config: Debug
