@@ -16,7 +16,7 @@ settings:
       - "$(PROJECT_DIR)/libs/libggml-cpu.a"
       - "-force_load"
       - "$(PROJECT_DIR)/libs/libggml-base.a"
-      - "-llama"
+      - "-lllama"
       - "-lggml"
       - "-lggml-base"
       - "-lggml-cpu"
