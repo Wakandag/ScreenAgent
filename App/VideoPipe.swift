@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import CoreMedia
 import VideoToolbox
 import CoreVideo
@@ -37,17 +38,19 @@ final class VideoPipe {
             guard let f = format else { return }
             var raw: VTDecompressionSession?
             let refcon = Unmanaged.passUnretained(self).toOpaque()
-            let cb: VTDecompressionOutputCallback = { refcon, status, _, buffer, _, _ in
+            let cb: VTDecompressionOutputCallback = { refcon, _, status, _, buffer, _, _ in
                 guard status == noErr, let buf = buffer, let ref = refcon else { return }
                 let pipe = Unmanaged<VideoPipe>.fromOpaque(ref).takeUnretainedValue()
                 pipe.sink(pixelBuffer: buf)
             }
+            var record = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: cb,
+                                                             decompressionOutputRefCon: refcon)
             let attrs: [CFString: Any] = [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA]
             let st = VTDecompressionSessionCreate(allocator: kCFAllocatorDefault,
                                                   formatDescription: f,
                                                   decoderSpecification: nil,
                                                   imageBufferAttributes: attrs as CFDictionary,
-                                                  outputCallback: cb,
+                                                  outputCallback: &record,
                                                   decompressionSessionOut: &raw)
             guard st == noErr, let s = raw else { return }
             session = s
@@ -88,7 +91,8 @@ final class VideoPipe {
         guard st == noErr, let sample = sb else { return }
         let flags: VTDecodeFrameFlags = []
         var info = VTDecodeInfoFlags()
-        VTDecompressionSessionDecodeFrame(session, sample, flags, nil, &info)
+        VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: flags,
+                                          frameRefcon: nil, infoFlagsOut: &info)
     }
 
     /// Latest frame converted to a UIImage for display (throttle at the caller).
