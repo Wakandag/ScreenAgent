@@ -42,9 +42,10 @@ final class BoardSession {
             expectedBoardID = Data(hex: bid)
         }
         if let kid = UserDefaults.standard.string(forKey: "lastBoardID"),
-           let kk = UserDefaults.standard.data(forKey: "K.\(kid)") {
+           let kk = UserDefaults.standard.data(forKey: "K.\(kid)"),
+           let bid = Data(hex: kid) {
             k = kk
-            boardID = Data(hex: kid)
+            boardID = bid
         }
     }
 
@@ -252,7 +253,7 @@ final class BoardSession {
     }
 
     private func seal(stream: UInt8, type: UInt8, ctr: UInt32, plain: Data) -> Data {
-        guard let c2b else { return Data() }
+        guard !c2b.isEmpty else { return Data() }
         var hdr = Data([type])
         withUnsafeBytes(of: ctr.littleEndian) { hdr += Data($0) }
         guard let (ct, tag) = try? AESGCM.seal(key: c2b, nonce: Self.nonce(stream, ctr),

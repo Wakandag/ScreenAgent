@@ -105,7 +105,7 @@ final class LLM {
             if token < 0 || token >= nVocab { break }
             let n = llama_token_to_piece(vocab, token, &piece, 63, 0, true)
             if n <= 0 { break }
-            out += String(decoding: piece[0..<Int(n)], as: UTF8.self)
+            out += String(decoding: piece[0..<Int(n)].map { UInt8(bitPattern: $0) }, as: UTF8.self)
             generated += 1
             if out.contains("<|im_end|>") || out.contains("<|im_start|>") {
                 out = out.replacingOccurrences(of: "<|im_end|>", with: "")
