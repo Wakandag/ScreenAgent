@@ -73,7 +73,7 @@ final class BoardSession {
     // MARK: Session
 
     func open() async throws {
-        guard let k else {
+        guard let k = k else {
             throw NSError(domain: "board", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "not paired yet: unplug and replug the board, then Pair within 3 minutes"])
         }
@@ -104,12 +104,12 @@ final class BoardSession {
         case 0x81: handlePaired(Data(frame.dropFirst()))
         case 0x82: handleWelcome(Data(frame.dropFirst()))
         case 0x10:
-            guard let k, !c2b.isEmpty else { return }
-            let (ctr, plain) = AESGCM.open(key: b2c, nonce: Self.nonce(UInt8(ascii: "B"), ctr),
-                                           aad: frame.prefix(5), frame: frame)
-            guard let plain, ctr > ctrB else { return }
-            guard ctr == ctrB + 1 else { sessionDied(); return }
-            ctrB = ctr
+            guard !b2c.isEmpty else { return }
+            let (ctrCin, plainCin) = openCtr(frame, stream: UInt8(ascii: "B"))
+            guard let plain = plainCin else { return }
+            guard ctrCin > ctrB else { return }
+            guard ctrCin == ctrB + 1 else { sessionDied(); return }
+            ctrB = ctrCin
             guard let kind = plain.first else { return }
             let body = plain.dropFirst()
             switch kind {
@@ -118,19 +118,17 @@ final class BoardSession {
             default: break
             }
         case 0x11:
-            guard let k, !b2c.isEmpty else { return }
-            let (ctr, plain) = AESGCM.open(key: b2c, nonce: Self.nonce(UInt8(ascii: "V"), ctr),
-                                           aad: frame.prefix(5), frame: frame)
-            guard let plain, ctr > ctrV else { return }
-            let gap = ctr != ctrV + 1
-            ctrV = ctr
+            guard !b2c.isEmpty else { return }
+            let (ctrVin, plainVin) = openCtr(frame, stream: UInt8(ascii: "V"))
+            guard let plain = plainVin, ctrVin > ctrV else { return }
+            let gap = ctrVin != ctrV + 1
+            ctrV = ctrVin
             emit(.video(plain, gap: gap))
         case 0x12:
-            guard let k, !b2c.isEmpty else { return }
-            let (ctr, _) = AESGCM.open(key: b2c, nonce: Self.nonce(UInt8(ascii: "A"), ctr),
-                                       aad: frame.prefix(5), frame: frame) ?? (0, nil)
-            guard ctr > ctrA else { return }
-            ctrA = ctr   // audio not used yet; keep the counter alive
+            guard !b2c.isEmpty else { return }
+            let (ctrAin, _) = openCtr(frame, stream: UInt8(ascii: "A"))
+            guard ctrAin > ctrA else { return }
+            ctrA = ctrAin   // audio not used yet; keep the counter alive
         case 0xE0:
             emit(.boardError(String(decoding: frame.dropFirst(), as: UTF8.self)))
         default: break
@@ -147,10 +145,8 @@ final class BoardSession {
         do {
             let pk = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: bPub)
             let shared = try cPriv.sharedSecretFromKeyAgreement(with: pk)
-            let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self,
-                                                     salt: Data(Self.pairSalt.utf8),
-                                                     sharedInfoAtInfo: cPub + bPub,
-                                                     outputByteCount: 32).withUnsafeBytes { Data($0) }
+            let sharedRaw = shared.withUnsafeBytes { Data($0) }
+            let key = Self.hkdf(ikm: sharedRaw, salt: Data(Self.pairSalt.utf8), info: cPub + bPub)
             let expect = Self.mac(key, Data("paired".utf8), clientID)
             guard expect == mac else {
                 resumeWaiter(&pairWaiter, NSError(domain: "board", code: 4,
@@ -177,10 +173,7 @@ final class BoardSession {
             resumeWaiter(&sessionWaiter, NSError(domain: "board", code: 6,
                 userInfo: [NSLocalizedDescriptionKey: "hello MAC mismatch"])); return
         }
-        let okm = SymmetricKey(data: k).hkdfDerivedSymmetricKey(using: SHA256.self,
-                                                                salt: cNonce + bNonce,
-                                                                sharedInfoAtInfo: Data(Self.sessionInfo.utf8),
-                                                                outputByteCount: 32).withUnsafeBytes { Data($0) }
+        let okm = Self.hkdf(ikm: k, salt: cNonce + bNonce, info: Data(Self.sessionInfo.utf8))
         c2b = okm.prefix(16)
         b2c = okm.suffix(16)
         ctrC = 0; ctrB = 0; ctrV = 0; ctrA = 0
@@ -203,6 +196,17 @@ final class BoardSession {
 
     // MARK: Crypto helpers
 
+    /// Parse the plaintext header [type u8][ctr u32 LE] and decrypt the rest with k_b2c.
+    private func openCtr(_ frame: Data, stream: UInt8) -> (UInt32, Data?) {
+        guard frame.count > 5 + 12, !b2c.isEmpty else { return (0, nil) }
+        let ctr = UInt32(frame[1]) | (UInt32(frame[2]) << 8) | (UInt32(frame[3]) << 16) | (UInt32(frame[4]) << 24)
+        let plain = AESGCM.open(key: b2c, nonce: Self.nonce(stream, ctr),
+                                aad: Data(frame.prefix(5)),
+                                ct: Data(frame.dropFirst(5).dropLast(12)),
+                                tag: Data(frame.suffix(12)))
+        return (ctr, plain)
+    }
+
     func addListener(_ l: @escaping (Event) -> Void) { listeners.append(l) }
 
     private func emit(_ e: Event) {
@@ -218,6 +222,21 @@ final class BoardSession {
                           userInfo: [NSLocalizedDescriptionKey: "no BLE link attached"])
         }
         outbound(frame)
+    }
+
+    /// RFC 5869 HKDF-SHA256 (extract with `salt`, expand with `info`).
+    static func hkdf(ikm: Data, salt: Data, info: Data, length: Int = 32) -> Data {
+        let prk = Data(HMAC<SHA256>.authenticationCode(for: ikm, using: SymmetricKey(data: salt)))
+        var okm = Data()
+        var t = Data()
+        var counter: UInt8 = 1
+        while okm.count < length {
+            t = Data(HMAC<SHA256>.authenticationCode(for: t + info + Data([counter]),
+                                                     using: SymmetricKey(data: prk)))
+            okm += t
+            counter = counter &+ 1
+        }
+        return okm.prefix(length)
     }
 
     static func mac(_ key: Data, _ parts: Data...) -> Data {
