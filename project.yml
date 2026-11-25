@@ -37,6 +37,7 @@ targets:
       - path: App
         excludes:
           - "Resources/**"
+          - "Icons/**"
       - path: App/Resources
         type: folder
         buildPhase: resources
@@ -61,6 +62,7 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        LSRequiresIPhoneOS: true
         NSBluetoothAlwaysUsageDescription: ScreenAgent talks to the ESP32 Agent board over Bluetooth to see the screen and move the pointer.
         CFBundleIcons:
           CFBundlePrimaryIcon:
