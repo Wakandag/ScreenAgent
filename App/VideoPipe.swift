@@ -120,7 +120,7 @@ final class VideoPipe {
             for x in 0..<width {
                 let sx = x * w / width
                 let o = sy * stride + sx * 4
-                let b = ptr[o], g = ptr[o+1], r = ptr[o+2]
+                let b = Int(ptr[o]), g = Int(ptr[o+1]), r = Int(ptr[o+2])
                 out[y * width + x] = UInt8((r * 299 + g * 587 + b * 114) >> 10)
             }
         }
