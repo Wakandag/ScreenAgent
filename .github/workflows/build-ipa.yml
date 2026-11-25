@@ -17,6 +17,19 @@ jobs:
       - name: Download bundled model
         run: bash Scripts/fetch-model.sh
 
+      - name: Compile asset catalog (Assets.car)
+        run: |
+          mkdir -p build/actool
+          xcrun actool --compile build/actool \
+            --platform iphoneos \
+            --minimum-deployment-target 16.4 \
+            --app-icon AppIcon \
+            --output-partial-info-plist build/actool/icon-partial.plist \
+            AppIcon.xcassets
+          ls -la build/actool
+          cp build/actool/Assets.car App/Assets.car
+          cat build/actool/icon-partial.plist || true
+
       - name: Generate Xcode project
         run: |
           brew install xcodegen
