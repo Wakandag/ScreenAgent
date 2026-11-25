@@ -25,7 +25,7 @@ settings:
     HEADER_SEARCH_PATHS:
       - "$(PROJECT_DIR)/headers"
       - "$(PROJECT_DIR)/llama.cpp/include"
-      - "$(PROJECT_DIR)/llama.cpp/ggml/src"
+      - "$(PROJECT_DIR)/llama.cpp/ggml/include"
       - "$(PROJECT_DIR)/llama.cpp/ggml/src/ggml-cpu"
     SWIFT_INCLUDE_PATHS: "$(PROJECT_DIR)/headers"
     SWIFT_OBJC_BRIDGING_HEADER: ""
