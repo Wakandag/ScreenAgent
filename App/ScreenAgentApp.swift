@@ -37,6 +37,7 @@ final class AgentViewModel: ObservableObject {
         link.onState = { [weak self] s in
             guard let self else { return }
             self.appendLog("link: \(s.rawValue)")
+            if s == .lost { self.session.linkLost() }
             Task { @MainActor in self.autoTick() }
         }
         session.onEvent = { [weak self] e in

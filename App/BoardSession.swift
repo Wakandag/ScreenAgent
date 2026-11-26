@@ -184,6 +184,18 @@ final class BoardSession {
         resumeWaiter(&sessionWaiter, nil)
     }
 
+    /// The BLE link dropped: the encrypted session cannot survive it, so wipe the
+    /// keys/counters and wake any open() caller with an error. Without this a
+    /// reconnected board would look like it still has a session and never re-open.
+    func linkLost() {
+        guard hasSession || sessionWaiter != nil else { return }
+        c2b = Data(); b2c = Data()
+        ctrC = 0; ctrB = 0; ctrV = 0; ctrA = 0
+        resumeWaiter(&sessionWaiter, NSError(domain: "board", code: 7,
+            userInfo: [NSLocalizedDescriptionKey: "link lost"]))
+        emit(.state("link lost"))
+    }
+
     private func sessionDied() {
         c2b = Data(); b2c = Data()
         ctrC = 0; ctrB = 0; ctrV = 0; ctrA = 0
