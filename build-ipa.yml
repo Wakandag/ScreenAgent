@@ -1,0 +1,48 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build llama.cpp static libs
+        run: bash Scripts/build-llama.sh
+
+      - name: Download bundled model
+        run: bash Scripts/fetch-model.sh
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build unsigned .app
+        run: |
+          xcodebuild -project ScreenAgent.xcodeproj \
+            -scheme ScreenAgent \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -r "build/dd/Build/Products/Release-iphoneos/ScreenAgent.app" Payload/
+          zip -qr ScreenAgent.ipa Payload
+          ls -la ScreenAgent.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenAgent-ipa
+          path: ScreenAgent.ipa
