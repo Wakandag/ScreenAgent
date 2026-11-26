@@ -35,7 +35,7 @@ struct ContentView: View {
                 if !vm.boardStatus.isEmpty {
                     Text(vm.boardStatus).font(.caption2).foregroundColor(.secondary)
                 }
-                Text("Pair works only within 3 min of powering the board: unplug it, replug it, then tap Pair.").font(.caption).foregroundColor(.orange)
+                Text("Pairs automatically as soon as the board appears — the board only accepts pairing within 3 min of power-on.").font(.caption).foregroundColor(.blue)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

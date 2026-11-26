@@ -50,6 +50,8 @@ final class BoardSession {
     }
 
     var isPaired: Bool { k != nil }
+    var pairing: Bool { pairWaiter != nil }
+    var opening: Bool { sessionWaiter != nil }
     var hasSession: Bool { !c2b.isEmpty }
     var boardIDHex: String { boardID.hex }
 

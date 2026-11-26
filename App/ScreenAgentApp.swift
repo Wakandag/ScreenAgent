@@ -21,6 +21,11 @@ final class AgentViewModel: ObservableObject {
     lazy var loop: AgentLoop = AgentLoop(video: video, pointer: pointer, llm: llm)
 
     private var statusTimer: Timer?
+    private var autoTimer: Timer?
+    private var autoPilot = false
+    private var lastPairAttempt = Date.distantPast
+    private var lastOpenAttempt = Date.distantPast
+    private var lastScanStart = Date.distantPast
 
     init() {
         session.outbound = { [weak self] frame in
@@ -30,7 +35,9 @@ final class AgentViewModel: ObservableObject {
             self?.session.feed(frame)
         }
         link.onState = { [weak self] s in
-            self?.appendLog("link: \(s.rawValue)")
+            guard let self else { return }
+            self.appendLog("link: \(s.rawValue)")
+            Task { @MainActor in self.autoTick() }
         }
         session.onEvent = { [weak self] e in
             guard let self else { return }
@@ -60,6 +67,48 @@ final class AgentViewModel: ObservableObject {
         }
         loop.onLog = { [weak self] in self?.appendLog($0) }
         startStatusTimer()
+        startAuto()
+    }
+
+    // MARK: Auto connect / pair / open
+
+    /// Keeps the link up without taps: scan at launch, pair the moment the board
+    /// shows up (the board only accepts pairing in the 3 min after power-on), then
+    /// open the encrypted session and request the video stream.
+    func startAuto() {
+        guard !autoPilot else { return }
+        autoPilot = true
+        autoTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.autoTick() }
+        }
+        link.start()
+        lastScanStart = Date()
+        appendLog("auto: scanning for ESP32 Agent ...")
+    }
+
+    private func autoTick() {
+        guard autoPilot else { return }
+        guard link.state == .ready else {
+            // BLELink rescans on its own after a drop; only nudge it if the scan
+            // stopped for good (e.g. the app came back from the background).
+            if link.state != .connecting, Date().timeIntervalSince(lastScanStart) > 10 {
+                lastScanStart = Date()
+                link.start()
+            }
+            return
+        }
+        guard state != "session" else { return }
+        if session.isPaired {
+            guard !session.opening, Date().timeIntervalSince(lastOpenAttempt) > 5 else { return }
+            lastOpenAttempt = Date()
+            appendLog("auto: opening session")
+            openSession()
+        } else {
+            guard !session.pairing, Date().timeIntervalSince(lastPairAttempt) > 8 else { return }
+            lastPairAttempt = Date()
+            appendLog("auto: board found, pairing")
+            pair()
+        }
     }
 
     private func startStatusTimer() {
@@ -85,7 +134,9 @@ final class AgentViewModel: ObservableObject {
     }
 
     func connect() {
+        if !autoPilot { startAuto(); return }
         link.start()
+        lastScanStart = Date()
         appendLog("scanning for ESP32 Agent ...")
     }
 
