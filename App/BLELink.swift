@@ -35,7 +35,33 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func start() {
         wantConnect = true
-        if central.state == .poweredOn { scan() }
+        if central.state == .poweredOn { connectIfAlreadyLinked() ?? scan() }
+    }
+
+    /// The phone keeps its own bonded link to the board (HID), and a connected
+    /// peripheral does not advertise, so scanning finds nothing. Adopt the link
+    /// the system already holds before falling back to a scan.
+    @discardableResult
+    private func connectIfAlreadyLinked() -> Void? {
+        guard self.peripheral == nil, connectingID == nil else { return () }
+
+        func adopt(_ p: CBPeripheral) {
+            connectingID = p.identifier
+            self.peripheral = p
+            p.delegate = self
+            state = .connecting
+            central.connect(p, options: nil)
+        }
+
+        if let connected = central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID]).first {
+            adopt(connected)
+            return ()
+        }
+        if let saved = UserDefaults.standard.string(forKey: "lastPeripheralID"),
+           let uuid = UUID(uuidString: saved) {
+            central.retrievePeripherals(withIdentifiers: [uuid]).forEach { adopt($0) }
+        }
+        return nil
     }
 
     func stop() {
@@ -63,7 +89,7 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if central.state == .poweredOn {
-            if wantConnect { scan() }
+            if wantConnect { connectIfAlreadyLinked() ?? scan() }
         } else {
             state = .off
         }
@@ -81,6 +107,7 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         // is dropped by the firmware while the phone's own app link is up.
         let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
         guard uuids.contains(Self.serviceUUID) else { return }
+        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastPeripheralID")
         connectingID = peripheral.identifier
         central.stopScan()
         self.peripheral = peripheral
