@@ -35,7 +35,7 @@ struct ContentView: View {
                 if !vm.boardStatus.isEmpty {
                     Text(vm.boardStatus).font(.caption2).foregroundColor(.secondary)
                 }
-                Text("Pairs automatically as soon as the board appears — the board only accepts pairing within 3 min of power-on.").font(.caption).foregroundColor(.blue)
+                Text("Connects automatically over Bluetooth; the phone's bond with the board is the pairing.").font(.caption).foregroundColor(.blue)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

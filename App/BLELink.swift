@@ -1,26 +1,32 @@
 import Foundation
 import CoreBluetooth
 
-/// BLE transport for the board's CLI service (...0010). One frame per notify / write.
+/// BLE transport for the board's app service (...0000): plain command lines out,
+/// replies / status JSON / H.264 chunks in. Security is the iPhone's own bonded
+/// LE link to the board, so there is no in-app pairing or session handshake.
 final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    static let serviceUUID  = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0010")
-    private static let inUUID   = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0011")
-    private static let outUUID  = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0012")
-    private static let inNRUUID = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0013")
+    static let serviceUUID = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0000")
+    private static let cmdUUID    = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0001")
+    private static let replyUUID  = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0002")
+    private static let statusUUID = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0003")
+    private static let videoUUID  = CBUUID(string: "6E400001-A9E8-4B1B-9C39-6D6F8A3C0004")
 
     enum State: String { case off, scanning, connecting, ready, lost }
 
-    var onFrame: ((Data) -> Void)?
+    var onReply: ((String) -> Void)?
+    var onStatus: ((Data) -> Void)?
+    var onVideo: ((Data) -> Void)?
     var onState: ((State) -> Void)?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var connectingID: UUID?
-    private var inChar: CBCharacteristic?
-    private var outChar: CBCharacteristic?
-    private var inNRChar: CBCharacteristic?
+    private var cmdChar: CBCharacteristic?
+    private var notifyChars = Set<CBUUID>()
+    private let requiredNotifies: Set<CBUUID> = [replyUUID, statusUUID, videoUUID]
     private var wantConnect = false
     private(set) var state: State = .off { didSet { if state != oldValue { onState?(state) } } }
+
 
     override init() {
         super.init()
@@ -43,16 +49,14 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         central.scanForPeripherals(withServices: nil, options: nil)
     }
 
-    func write(_ frame: Data) throws {
-        guard let p = peripheral, let inCh = inChar, p.state == .connected else {
+    /// One command line, e.g. "3 stream on" or "4 move 12 0".
+    func write(_ text: String) throws {
+        guard let p = peripheral, let ch = cmdChar, p.state == .connected else {
             throw NSError(domain: "ble", code: 1, userInfo: [NSLocalizedDescriptionKey: "not connected"])
         }
-        let nrMax = p.maximumWriteValueLength(for: .withoutResponse)
-        if frame.count <= min(nrMax, 512), let nr = inNRChar {
-            p.writeValue(frame, for: nr, type: .withoutResponse)
-        } else {
-            p.writeValue(frame, for: inCh, type: .withResponse)   // OS splits into long writes
-        }
+        let data = Data(text.utf8)
+        let type: CBCharacteristicWriteType = ch.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+        p.writeValue(data, for: ch, type: type)
     }
 
     // MARK: CBCentralManagerDelegate
@@ -68,14 +72,13 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard self.peripheral == nil, connectingID == nil else { return }
-        // Some firmware builds prefix the BLE identity with a mode word
-        // ("CLI ESP32 Agent 38CD"), so match the name anywhere instead of
-        // requiring it at the start, and fall back to the advertised local
-        // name when CBPeripheral.name is empty.
+        // The board's identity may carry a mode prefix ("CLI ESP32 Agent 38CD"),
+        // so match the name anywhere and fall back to the advertised local name.
         let advName = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
         guard let name = peripheral.name ?? (advName.isEmpty ? nil : advName),
               name.range(of: "esp32 agent", options: .caseInsensitive) != nil else { return }
-        // only the CLI identity (service ...0010); the app identity advertises ...0000
+        // Only the app identity (service ...0000) is usable: the CLI identity (...0010)
+        // is dropped by the firmware while the phone's own app link is up.
         let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
         guard uuids.contains(Self.serviceUUID) else { return }
         connectingID = peripheral.identifier
@@ -99,7 +102,8 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
-        inChar = nil; outChar = nil; inNRChar = nil
+        cmdChar = nil
+        notifyChars.removeAll()
         state = .lost
         self.peripheral = nil
         connectingID = nil
@@ -111,34 +115,41 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     // MARK: CBPeripheralDelegate
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let svc = peripheral.services?.first else { return }
-        peripheral.discoverCharacteristics([Self.inUUID, Self.outUUID, Self.inNRUUID], for: svc)
+        guard let svc = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else { return }
+        peripheral.discoverCharacteristics([Self.cmdUUID, Self.replyUUID, Self.statusUUID, Self.videoUUID],
+                                           for: svc)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
         for ch in service.characteristics ?? [] {
             switch ch.uuid {
-            case Self.inUUID: inChar = ch
-            case Self.outUUID:
-                outChar = ch
+            case Self.cmdUUID:
+                cmdChar = ch
+            case Self.replyUUID, Self.statusUUID, Self.videoUUID:
+                notifyChars.insert(ch.uuid)
                 peripheral.setNotifyValue(true, for: ch)
-            case Self.inNRUUID: inNRChar = ch
-            default: break
+            default:
+                break
             }
         }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral,
-                    didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        if characteristic.uuid == Self.outUUID, error == nil {
+        if cmdChar != nil, notifyChars.isSuperset(of: requiredNotifies) {
             state = .ready
         }
     }
 
-    func peripheral(_ peripheral: CBPeripheral,
-                    didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard characteristic.uuid == Self.outUUID, let d = characteristic.value else { return }
-        onFrame?(d)
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard let d = characteristic.value, !d.isEmpty else { return }
+        switch characteristic.uuid {
+        case Self.replyUUID:
+            onReply?(String(decoding: d, as: UTF8.self))
+        case Self.statusUUID:
+            onStatus?(d)
+        case Self.videoUUID:
+            onVideo?(d)
+        default:
+            break
+        }
     }
 }

@@ -28,11 +28,20 @@ final class AgentViewModel: ObservableObject {
     private var lastScanStart = Date.distantPast
 
     init() {
-        session.outbound = { [weak self] frame in
-            try? self?.link.write(frame)
+        session.outbound = { [weak self] line in
+            try? self?.link.write(line)
         }
-        link.onFrame = { [weak self] frame in
-            self?.session.feed(frame)
+        session.onVideoChunk = { [weak self] chunk, gap in
+            self?.video.feed(chunk, gap: gap)
+        }
+        link.onReply = { [weak self] line in
+            self?.session.handleReply(line)
+        }
+        link.onStatus = { [weak self] data in
+            self?.session.handleStatus(data)
+        }
+        link.onVideo = { [weak self] chunk in
+            self?.session.handleVideo(chunk)
         }
         link.onState = { [weak self] s in
             guard let self else { return }
