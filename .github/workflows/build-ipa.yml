@@ -44,6 +44,16 @@ jobs:
         run: |
           APP="build/dd/Build/Products/Release-iphoneos/ScreenAgent.app"
           SRC="AppIcon.xcassets/AppIcon.appiconset/icon1024.png"
+          # A Resources/ folder inside the .app makes LaunchServices treat the
+          # bundle as an old macOS-style (non-flat) bundle and refuse it with
+          # 181 "Failed to add app to icon cache". Keep the model at the root;
+          # LLM.swift looks for it there first.
+          if [ -f "$APP/Resources/model.gguf" ]; then
+            mv "$APP/Resources/model.gguf" "$APP/model.gguf"
+          fi
+          rm -rf "$APP/Resources"
+          test -f "$APP/model.gguf" || { echo "model.gguf missing from bundle root"; exit 1; }
+          test ! -d "$APP/Resources" || { echo "Resources folder must not ship"; exit 1; }
           # installd resolves every name in CFBundleIconFiles to loose PNGs in
           # the bundle; if one is missing the registration step fails with 181.
           for spec in 20x20@2x:40 20x20@3x:60 29x29@2x:58 29x29@3x:87 \
