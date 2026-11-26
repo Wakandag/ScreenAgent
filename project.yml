@@ -64,6 +64,24 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         LSRequiresIPhoneOS: true
         NSBluetoothAlwaysUsageDescription: ScreenAgent talks to the ESP32 Agent board over Bluetooth to see the screen and move the pointer.
+        # Icon metadata is required even when no Assets.car is shipped: without
+        # these keys LaunchServices rejects the bundle during registration and
+        # TrollStore fails the install with error 181 (icon cache).
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconName: AppIcon
+            CFBundleIconFiles:
+              - AppIcon60x60
+              - AppIcon40x40
+              - AppIcon29x29
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconName: AppIcon
+            CFBundleIconFiles:
+              - AppIcon60x60
+              - AppIcon76x76
+              - AppIcon40x40
+              - AppIcon29x29
         UIBackgroundModes:
           - bluetooth-central
         ITSAppUsesNonExemptEncryption: false
