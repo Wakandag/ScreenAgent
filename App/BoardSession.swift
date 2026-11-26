@@ -38,7 +38,6 @@ final class BoardSession {
     }
 
     func open() async throws {
-        guard !opened else { return }
         opened = true
         emit(.state("session"))
     }

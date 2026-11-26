@@ -15,9 +15,12 @@ final class VideoPipe {
     private(set) var latestPixelBuffer: CVPixelBuffer?
     private var latestAt = Date.distantPast
     var onNewFrame: (() -> Void)?
+    /// Chunks received from the board, for diagnostics.
+    private(set) var chunks = 0
     let ciContext = CIContext()
 
     func feed(_ chunk: Data, gap: Bool) {
+        chunks += 1
         if gap { reassembler.lost() }
         if let au = reassembler.feed(chunk) { handle(au) }
     }

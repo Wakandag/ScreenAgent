@@ -107,7 +107,7 @@ final class AgentViewModel: ObservableObject {
             }
             return
         }
-        guard state != "session" else { return }
+        guard !(session.hasSession && state == "session") else { return }
         if session.isPaired {
             guard !session.opening, Date().timeIntervalSince(lastOpenAttempt) > 5 else { return }
             lastOpenAttempt = Date()
@@ -129,7 +129,7 @@ final class AgentViewModel: ObservableObject {
                 if let s = self.video.graySnapshot() {
                     self.appendLog("video: \(s.w)x\(s.h) live")
                 } else if self.state == "session" {
-                    self.appendLog("video: no frames (turn on Screen Mirroring to the board)")
+                    self.appendLog("video: no frames (\(self.video.chunks) chunks, turn on Screen Mirroring to the board)")
                 }
             }
         }
@@ -156,6 +156,10 @@ final class AgentViewModel: ObservableObject {
                 try await session.open()
                 try await session.sendCommand("stream on")
                 appendLog("video stream requested")
+                // A stream that starts mid-GOP carries no SPS/PPS, so ask for the
+                // current GOP (snap = SPS/PPS + every AU since the last IDR).
+                try await session.sendCommand("snap")
+                appendLog("video: asked for the current GOP (snap)")
             } catch {
                 appendLog("open failed: \(error)")
             }
