@@ -68,7 +68,13 @@ final class BLELink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard self.peripheral == nil, connectingID == nil else { return }
-        guard let name = peripheral.name, name.hasPrefix("ESP32 Agent") else { return }
+        // Some firmware builds prefix the BLE identity with a mode word
+        // ("CLI ESP32 Agent 38CD"), so match the name anywhere instead of
+        // requiring it at the start, and fall back to the advertised local
+        // name when CBPeripheral.name is empty.
+        let advName = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
+        guard let name = peripheral.name ?? (advName.isEmpty ? nil : advName),
+              name.range(of: "esp32 agent", options: .caseInsensitive) != nil else { return }
         // only the CLI identity (service ...0010); the app identity advertises ...0000
         let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
         guard uuids.contains(Self.serviceUUID) else { return }
