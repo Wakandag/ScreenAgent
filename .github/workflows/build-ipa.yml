@@ -17,6 +17,11 @@ jobs:
       - name: Download bundled model
         run: bash Scripts/fetch-model.sh
 
+      # No Assets.car is shipped on purpose: the actool-compiled catalog made
+      # LaunchServices fail to build the icon cache (TrollStore error 181).
+      # The loose AppIcon*.png files declared in CFBundleIconFiles are generated
+      # in the packaging step below.
+
       - name: Generate Xcode project
         run: |
           brew install xcodegen
@@ -37,8 +42,29 @@ jobs:
 
       - name: Package IPA
         run: |
+          APP="build/dd/Build/Products/Release-iphoneos/ScreenAgent.app"
+          SRC="AppIcon.xcassets/AppIcon.appiconset/icon1024.png"
+          # installd resolves every name in CFBundleIconFiles to loose PNGs in
+          # the bundle; if one is missing the registration step fails with 181.
+          for spec in 20x20@2x:40 20x20@3x:60 29x29@2x:58 29x29@3x:87 \
+                      40x40@2x:80 40x40@3x:120 60x60@2x:120 60x60@3x:180 \
+                      76x76@2x~ipad:152 83.5x83.5@2x~ipad:167; do
+            name="${spec%%:*}"
+            px="${spec##*:}"
+            sips -s format png -z "$px" "$px" "$SRC" --out "$APP/AppIcon${name}.png" >/dev/null
+          done
+          sips -s format png -z 512 512 "$SRC" --out "$APP/iTunesArtwork" >/dev/null
+          sips -s format png -z 1024 1024 "$SRC" --out "$APP/iTunesArtwork@2x" >/dev/null
+          ls -la "$APP" | grep -E 'AppIcon|iTunesArtwork'
+          # fail the build instead of uploading an IPA that cannot install
+          for icon in AppIcon60x60@2x AppIcon60x60@3x AppIcon40x40@2x \
+                      AppIcon29x29@2x AppIcon76x76@2x~ipad; do
+            test -f "$APP/$icon.png" || { echo "missing $icon.png"; exit 1; }
+          done
+          grep -q CFBundleIconFiles "$APP/Info.plist" \
+            || { echo "Info.plist has no CFBundleIconFiles"; exit 1; }
           mkdir Payload
-          cp -r "build/dd/Build/Products/Release-iphoneos/ScreenAgent.app" Payload/
+          cp -r "$APP" Payload/
           zip -qr ScreenAgent.ipa Payload
           ls -la ScreenAgent.ipa
 
