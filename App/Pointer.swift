@@ -316,18 +316,31 @@ final class Pointer {
         try await Task.sleep(nanoseconds: 900_000_000)
         guard let pt = FrameDiff.locate(before: before, after: after),
               pt.x > 0.02, pt.x < 0.98, pt.y > 0.02, pt.y < 0.98 else {
-            onLog?("calibration: cursor not visible on screen")
+            report("calibration: cursor not visible on screen")
             throw PointerError.notFound
         }
-        let w = Int((200.0 / pt.x).rounded()), h = Int((200.0 / pt.y).rounded())
+        // The diff holds the cursor before and after the 12 unit wiggle, so its
+        // centroid sits at 206 units from home, not 200.
+        let mid = 206.0
+        let w = Int((mid / pt.x).rounded()), h = Int((mid / pt.y).rounded())
         guard (100..<5000).contains(w), (100..<5000).contains(h) else {
-            onLog?("calibration: implausible span \(w)x\(h), cursor not found")
+            report("calibration: implausible span \(w)x\(h), cursor not found")
+            throw PointerError.notFound
+        }
+        // A pointer that really crosses the screen maps it in proportion, so the
+        // span must have roughly the screen's aspect ratio. Anything else is UI
+        // noise that happened to differ between the two frames (the app drawing
+        // itself), not a cursor.
+        let screenAspect = Double(before.w) / Double(before.h)
+        let spanAspect = Double(w) / Double(h)
+        guard spanAspect > screenAspect * 0.8, spanAspect < screenAspect * 1.25 else {
+            report("calibration: rejected span \(w)x\(h) (aspect \(f3(spanAspect)) vs screen \(f3(screenAspect))) - no cursor visible")
             throw PointerError.notFound
         }
         spanW = w; spanH = h
         gainX = 1; gainY = 1; offX = 0; offY = 0
         UserDefaults.standard.removeObject(forKey: "pmap")   // a fresh span invalidates it
         saveSpan()
-        onLog?("calibrated: span \(w)x\(h)")
+        report("calibrated: span \(w)x\(h)")
     }
 }
