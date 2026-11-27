@@ -132,6 +132,11 @@ final class AgentViewModel: ObservableObject {
                 } else if self.state == "session" {
                     self.appendLog("video: no frames (\(self.video.chunks) chunks, turn on Screen Mirroring to the board)")
                 }
+                // Chunks arriving without a decodable frame means we lost GOP sync:
+                // 'snap' re-sends SPS/PPS plus the current GOP.
+                if self.state == "session", self.video.frames == 0, self.video.chunks > 0 {
+                    try? self.session.sendCommand("snap")
+                }
             }
         }
     }

@@ -19,6 +19,8 @@ final class VideoPipe {
     private(set) var chunks = 0
     var onLog: ((String) -> Void)?
     private var aus = 0
+    /// Frames handed to the screen, for diagnostics/resync.
+    private(set) var frames = 0
     let ciContext = CIContext()
 
     func feed(_ chunk: Data, gap: Bool) {
@@ -76,6 +78,7 @@ final class VideoPipe {
     }
 
     private func sink(pixelBuffer: CVPixelBuffer) {
+        frames += 1
         latestPixelBuffer = pixelBuffer
         latestAt = Date()
         onNewFrame?()
@@ -155,26 +158,27 @@ final class VideoPipe {
     // MARK: NAL helpers
 
     static func nals(_ data: Data) -> [(type: UInt8, body: Data)] {
-        var result: [(UInt8, Data)] = []
-        var i = 0
         let d = [UInt8](data)
-        var starts: [Int] = []
-        while i + 3 < d.count {
-            if d[i] == 0 && d[i+1] == 0 && d[i+2] == 1 { starts.append(i + 3); i += 3; continue }
+        // Start-code positions, with the length of each code so a NAL always ends
+        // exactly where the next code begins (3-byte codes end with a zero byte
+        // that belongs to the code, not to the NAL). Trailing payload zeros are
+        // real PPS/SPS bytes, so they must not be stripped.
+        var starts: [(body: Int, codeLen: Int)] = []
+        var i = 0
+        while i + 3 <= d.count {
+            if d[i] == 0 && d[i+1] == 0 && d[i+2] == 1 { starts.append((i + 3, 3)); i += 3; continue }
             if i + 4 <= d.count && d[i] == 0 && d[i+1] == 0 && d[i+2] == 0 && d[i+3] == 1 {
-                starts.append(i + 4); i += 4; continue
+                starts.append((i + 4, 4)); i += 4; continue
             }
             i += 1
         }
+        var result: [(UInt8, Data)] = []
         for (n, s) in starts.enumerated() {
-            let e = n + 1 < starts.count ? starts[n + 1] - 3 : d.count
-            let end = min(e, d.count)
-            if s > d.count || end <= s { continue }
-            var body = Array(d[s..<end])
-            // strip trailing start-code zeros of the next NAL
-            while let last = body.last, last == 0 { body.removeLast() }
+            let end = n + 1 < starts.count ? starts[n + 1].body - starts[n + 1].codeLen : d.count
+            guard s < end, end <= d.count else { continue }
+            let body = Data(d[s..<end])
             guard let t = body.first else { continue }
-            result.append((t & 0x1F, Data(body.dropFirst())))
+            result.append((t & 0x1F, body.dropFirst()))
         }
         return result
     }
