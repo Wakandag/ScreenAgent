@@ -177,6 +177,21 @@ final class Pointer {
         return (p.x - Double(wiggle) / Double(spanW), p.y)
     }
 
+    /// A link drop mid-observation shows up as a timeout; restarting from home
+    /// makes the whole measurement safe to repeat.
+    private func observeWithRetry(ux: Int, uy: Int) async throws -> (x: Double, y: Double) {
+        var last: Swift.Error = PointerError.timeout
+        for attempt in 0..<3 {
+            do { return try await observe(ux: ux, uy: uy) }
+            catch {
+                last = error
+                onLog?("pointer: sample retry \(attempt + 1) (\(error))")
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        throw last
+    }
+
     /// Least squares fit of v = a*u + b.
     private func fit(_ s: [(u: Double, v: Double)]) -> (a: Double, b: Double)? {
         let n = Double(s.count)
@@ -197,10 +212,18 @@ final class Pointer {
         for (tx, ty) in [(0.25, 0.25), (0.70, 0.30), (0.40, 0.70)] as [(Double, Double)] {
             let ux = (tx * Double(spanW) - offX) / gainX
             let uy = (ty * Double(spanH) - offY) / gainY
-            let p = try await observe(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
-            xs.append((ux, p.x * Double(spanW)))
-            ys.append((uy, p.y * Double(spanH)))
-            onLog?("pointer: aimed \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+            do {
+                let p = try await observeWithRetry(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
+                xs.append((ux, p.x * Double(spanW)))
+                ys.append((uy, p.y * Double(spanH)))
+                onLog?("pointer: aimed \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+            } catch {
+                onLog?("pointer: sample \(f3(tx)),\(f3(ty)) failed: \(error)")
+            }
+        }
+        guard xs.count >= 2, ys.count >= 2 else {
+            onLog?("pointer: not enough samples to fit a correction")
+            return
         }
         guard let fx = fit(xs), let fy = fit(ys),
               (0.5...1.8).contains(fx.a), (0.5...1.8).contains(fy.a) else {
@@ -213,8 +236,12 @@ final class Pointer {
         for (tx, ty) in [(0.5, 0.5), (0.22, 0.78)] as [(Double, Double)] {
             let ux = (tx * Double(spanW) - offX) / gainX
             let uy = (ty * Double(spanH) - offY) / gainY
-            let p = try await observe(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
-            onLog?("pointer: check \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+            do {
+                let p = try await observeWithRetry(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
+                onLog?("pointer: check \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+            } catch {
+                onLog?("pointer: check \(f3(tx)),\(f3(ty)) failed: \(error)")
+            }
         }
     }
 
