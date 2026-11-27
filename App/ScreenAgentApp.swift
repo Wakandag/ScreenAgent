@@ -86,6 +86,22 @@ final class AgentViewModel: ObservableObject {
         loop.onLog = { [weak self] in self?.appendLog($0) }
         startStatusTimer()
         startAuto()
+        // `defaults write com.screenagent.app autoVerify -bool YES` makes the next
+        // launch run the pointer check once the link and video are up, so it can be
+        // triggered without scrolling to the button.
+        if UserDefaults.standard.bool(forKey: "autoVerify") {
+            UserDefaults.standard.removeObject(forKey: "autoVerify")
+            Task { [weak self] in
+                guard let self else { return }
+                var waited = 0
+                while waited < 45, !(self.state == "session" && self.video.isFresh) {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    waited += 1
+                }
+                self.appendLog("pointer: auto check starting")
+                self.verifyPointer()
+            }
+        }
     }
 
     // MARK: Auto connect / pair / open
