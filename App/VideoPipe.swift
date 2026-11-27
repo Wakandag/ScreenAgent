@@ -179,7 +179,9 @@ final class VideoPipe {
             guard start < end, end <= d.count else { continue }
             let body = Data(d[start..<end])
             guard let t = body.first else { continue }
-            result.append((t & 0x1F, body.dropFirst()))
+            // Keep the whole NAL: VideoToolbox wants the header byte in both the
+            // parameter sets and the length-prefixed samples.
+            result.append((t & 0x1F, body))
         }
         return result
     }
