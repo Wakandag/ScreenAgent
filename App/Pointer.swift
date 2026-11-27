@@ -11,6 +11,9 @@ final class Pointer {
 
     private(set) var spanW = 0, spanH = 0
     var calibrated: Bool { spanW > 0 && spanH > 0 }
+    /// Measured aim correction: a commanded unit offset u puts the cursor at
+    /// v = gain * u + offset. Identity until a mapping check measures it.
+    private var gainX = 1.0, gainY = 1.0, offX = 0.0, offY = 0.0
     var onLog: ((String) -> Void)?
 
     private let gapBetweenKeys: UInt64 = 80_000_000   // 80 ms, iOS drops back-to-back keys otherwise
@@ -21,6 +24,11 @@ final class Pointer {
         if let raw = UserDefaults.standard.string(forKey: "span") {
             let p = raw.split(separator: "x").compactMap { Int($0) }
             if p.count == 2 { spanW = p[0]; spanH = p[1] }
+        }
+        if let m = UserDefaults.standard.stringArray(forKey: "pmap"), m.count == 4,
+           let gx = Double(m[0]), let gy = Double(m[1]),
+           let ox = Double(m[2]), let oy = Double(m[3]) {
+            gainX = gx; gainY = gy; offX = ox; offY = oy
         }
         session.addListener { [weak self] e in
             guard let self else { return }
@@ -122,8 +130,9 @@ final class Pointer {
 
     func point(nx: Double, ny: Double) async throws {
         guard calibrated else { throw PointerError.notCalibrated }
-        let dx = Int(min(max(nx, 0), 1) * Double(spanW))
-        let dy = Int(min(max(ny, 0), 1) * Double(spanH))
+        // Undo the measured aim error: commanded = (target - offset) / gain.
+        let dx = Int(((min(max(nx, 0), 1) * Double(spanW) - offX) / gainX).rounded())
+        let dy = Int(((min(max(ny, 0), 1) * Double(spanH) - offY) / gainY).rounded())
         try await home()
         try await move(dx: dx, dy: dy)
     }
@@ -147,6 +156,66 @@ final class Pointer {
         try await move(dx: Int((nx2 - nx1) * Double(spanW)), dy: Int((ny2 - ny1) * Double(spanH)))
         if hold { try await Task.sleep(nanoseconds: 250_000_000) }
         try await release()
+    }
+
+    // MARK: Mapping check
+
+    private func f3(_ v: Double) -> String { String(format: "%.3f", v) }
+
+    /// Park at home, move to the commanded unit offset, wiggle, and report where
+    /// the cursor actually shows up as screen fractions.
+    private func observe(ux: Int, uy: Int, wiggle: Int = 10) async throws -> (x: Double, y: Double) {
+        try await home()
+        try await move(dx: ux, dy: uy)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        let before = try await freshSnapshot()
+        try await move(dx: wiggle, dy: 0)
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let after = try await freshSnapshot()
+        try await move(dx: -wiggle, dy: 0)
+        guard let p = FrameDiff.locate(before: before, after: after) else { throw PointerError.notFound }
+        return (p.x - Double(wiggle) / Double(spanW), p.y)
+    }
+
+    /// Least squares fit of v = a*u + b.
+    private func fit(_ s: [(u: Double, v: Double)]) -> (a: Double, b: Double)? {
+        let n = Double(s.count)
+        guard n >= 2 else { return nil }
+        let su = s.reduce(0.0) { $0 + $1.u }, sv = s.reduce(0.0) { $0 + $1.v }
+        let suu = s.reduce(0.0) { $0 + $1.u * $1.u }, suv = s.reduce(0.0) { $0 + $1.u * $1.v }
+        let den = n * suu - su * su
+        guard abs(den) > 1e-6 else { return nil }
+        let a = (n * suv - su * sv) / den
+        return (a, (sv - a * su) / n)
+    }
+
+    /// Aim at known screen points, measure where the cursor really lands, learn the
+    /// correction and re-check it.
+    func verifyMapping() async throws {
+        guard calibrated else { throw PointerError.notCalibrated }
+        var xs: [(u: Double, v: Double)] = [], ys: [(u: Double, v: Double)] = []
+        for (tx, ty) in [(0.25, 0.25), (0.70, 0.30), (0.40, 0.70)] as [(Double, Double)] {
+            let ux = (tx * Double(spanW) - offX) / gainX
+            let uy = (ty * Double(spanH) - offY) / gainY
+            let p = try await observe(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
+            xs.append((ux, p.x * Double(spanW)))
+            ys.append((uy, p.y * Double(spanH)))
+            onLog?("pointer: aimed \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+        }
+        guard let fx = fit(xs), let fy = fit(ys),
+              (0.5...1.8).contains(fx.a), (0.5...1.8).contains(fy.a) else {
+            onLog?("pointer: measurement noisy, keeping span \(spanW)x\(spanH)")
+            return
+        }
+        gainX = fx.a; offX = fx.b; gainY = fy.a; offY = fy.b
+        UserDefaults.standard.set([String(gainX), String(gainY), String(offX), String(offY)], forKey: "pmap")
+        onLog?("pointer: mapping x gain \(f3(gainX)) off \(f3(offX)) / y gain \(f3(gainY)) off \(f3(offY))")
+        for (tx, ty) in [(0.5, 0.5), (0.22, 0.78)] as [(Double, Double)] {
+            let ux = (tx * Double(spanW) - offX) / gainX
+            let uy = (ty * Double(spanH) - offY) / gainY
+            let p = try await observe(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
+            onLog?("pointer: check \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+        }
     }
 
     // MARK: Calibration
@@ -189,6 +258,8 @@ final class Pointer {
             throw PointerError.notFound
         }
         spanW = w; spanH = h
+        gainX = 1; gainY = 1; offX = 0; offY = 0
+        UserDefaults.standard.removeObject(forKey: "pmap")   // a fresh span invalidates it
         saveSpan()
         onLog?("calibrated: span \(w)x\(h)")
     }

@@ -67,6 +67,7 @@ struct ContentView: View {
                     Text(vm.calibrated ? "calibrated" : "not calibrated")
                         .font(.caption).foregroundColor(vm.calibrated ? .green : .orange)
                 }
+                Button("Verify pointer") { vm.verifyPointer() }
                 Toggle("Head-follow (keep head centered)", isOn: $vm.headFollow)
                 Toggle("Agent mode (on-device LLM acts)", isOn: $vm.agentMode)
                 TextField("Goal", text: $vm.goal)

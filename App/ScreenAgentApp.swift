@@ -200,6 +200,16 @@ final class AgentViewModel: ObservableObject {
         }
     }
 
+    func verifyPointer() {
+        Task {
+            do {
+                try await pointer.verifyMapping()
+            } catch {
+                appendLog("pointer check failed: \(error)")
+            }
+        }
+    }
+
     func loadModel() {
         Task {
             llm.onLog = { self.appendLog($0) }
