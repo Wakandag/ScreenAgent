@@ -26,6 +26,14 @@ struct ContentView: View {
                     Spacer()
                     Text(vm.state).foregroundColor(.secondary)
                 }
+                // Pointer controls live up here: further down they scroll under the
+                // home indicator and cannot be tapped.
+                HStack {
+                    Button("Calibrate pointer") { vm.calibrate() }
+                    Text(vm.calibrated ? "calibrated" : "not calibrated")
+                        .font(.caption).foregroundColor(vm.calibrated ? .green : .orange)
+                    Button("Verify pointer") { vm.verifyPointer() }
+                }
                 HStack {
                     Button("Connect") { vm.connect() }
                     Button("Open session") { vm.openSession() }
@@ -62,12 +70,6 @@ struct ContentView: View {
     private var controlsSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Button("Calibrate pointer") { vm.calibrate() }
-                    Text(vm.calibrated ? "calibrated" : "not calibrated")
-                        .font(.caption).foregroundColor(vm.calibrated ? .green : .orange)
-                }
-                Button("Verify pointer") { vm.verifyPointer() }
                 Toggle("Head-follow (keep head centered)", isOn: $vm.headFollow)
                 Toggle("Agent mode (on-device LLM acts)", isOn: $vm.agentMode)
                 TextField("Goal", text: $vm.goal)
