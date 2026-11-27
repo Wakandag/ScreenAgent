@@ -34,6 +34,7 @@ final class AgentViewModel: ObservableObject {
         session.onVideoChunk = { [weak self] chunk, gap in
             self?.video.feed(chunk, gap: gap)
         }
+        video.onLog = { [weak self] line in self?.appendLog(line) }
         link.onReply = { [weak self] line in
             self?.session.handleReply(line)
         }

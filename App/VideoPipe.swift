@@ -17,6 +17,7 @@ final class VideoPipe {
     var onNewFrame: (() -> Void)?
     /// Chunks received from the board, for diagnostics.
     private(set) var chunks = 0
+    var onLog: ((String) -> Void)?
     let ciContext = CIContext()
 
     func feed(_ chunk: Data, gap: Bool) {
@@ -32,9 +33,14 @@ final class VideoPipe {
             if type == 7 && body != sps { sps = body; haveNewParams = true }
             if type == 8 && body != pps { pps = body; haveNewParams = true }
         }
-        if haveNewParams, !sps.isEmpty, !pps.isEmpty, let f = Self.format(sps: sps, pps: pps) {
-            format = f
-            session = nil   // rebuilt lazily
+        if haveNewParams {
+            if !sps.isEmpty, !pps.isEmpty, let f = Self.format(sps: sps, pps: pps) {
+                format = f
+                session = nil   // rebuilt lazily
+                onLog?("video: format ok (\(sps.count)B SPS, \(pps.count)B PPS)")
+            } else {
+                onLog?("video: format build failed")
+            }
         }
         guard format != nil else { return }
         if session == nil {
@@ -72,12 +78,17 @@ final class VideoPipe {
         let prefixed = Self.lengthPrefixed(annexB)
         guard !prefixed.isEmpty else { return }
         var bb: CMBlockBuffer?
-        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil,
-                                                 blockLength: prefixed.count, blockAllocator: nil,
-                                                 customBlockSource: nil, offsetToData: 0,
-                                                 dataLength: prefixed.count, flags: 0,
-                                                 blockBufferOut: &bb) == kCMBlockBufferNoErr,
-              let block = bb else { return }
+        // memoryBlock is NULL here, so the block buffer needs its own allocator.
+        let bbStatus = CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil,
+                                                          blockLength: prefixed.count,
+                                                          blockAllocator: kCFAllocatorDefault,
+                                                          customBlockSource: nil, offsetToData: 0,
+                                                          dataLength: prefixed.count, flags: 0,
+                                                          blockBufferOut: &bb)
+        guard bbStatus == kCMBlockBufferNoErr, let block = bb else {
+            onLog?("video: block buffer failed \(bbStatus)")
+            return
+        }
         prefixed.withUnsafeBytes {
             _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block,
                                               offsetIntoDestination: 0, dataLength: prefixed.count)
