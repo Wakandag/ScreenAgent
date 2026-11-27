@@ -162,6 +162,23 @@ final class Pointer {
 
     private func f3(_ v: Double) -> String { String(format: "%.3f", v) }
 
+    /// Measurement results also go to Documents/pointer.txt, so the numbers can
+    /// be read off the device without scrolling the in-app log.
+    private func report(_ line: String) {
+        onLog?(line)
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let url = dir.appendingPathComponent("pointer.txt")
+        let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let text = Data((stamp + " " + line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(text)
+            try? h.close()
+        } else {
+            try? text.write(to: url)
+        }
+    }
+
     /// Park at home, move to the commanded unit offset, wiggle, and report where
     /// the cursor actually shows up as screen fractions.
     private func observe(ux: Int, uy: Int, wiggle: Int = 10) async throws -> (x: Double, y: Double) {
@@ -208,6 +225,10 @@ final class Pointer {
     /// correction and re-check it.
     func verifyMapping() async throws {
         guard calibrated else { throw PointerError.notCalibrated }
+        if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("pointer.txt"))
+        }
+        report("start span \(spanW)x\(spanH) gain \(f3(gainX)),\(f3(gainY)) off \(f3(offX)),\(f3(offY))")
         var xs: [(u: Double, v: Double)] = [], ys: [(u: Double, v: Double)] = []
         for (tx, ty) in [(0.25, 0.25), (0.70, 0.30), (0.40, 0.70)] as [(Double, Double)] {
             let ux = (tx * Double(spanW) - offX) / gainX
@@ -216,31 +237,31 @@ final class Pointer {
                 let p = try await observeWithRetry(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
                 xs.append((ux, p.x * Double(spanW)))
                 ys.append((uy, p.y * Double(spanH)))
-                onLog?("pointer: aimed \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+                report("aimed \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
             } catch {
-                onLog?("pointer: sample \(f3(tx)),\(f3(ty)) failed: \(error)")
+                report("sample \(f3(tx)),\(f3(ty)) failed: \(error)")
             }
         }
         guard xs.count >= 2, ys.count >= 2 else {
-            onLog?("pointer: not enough samples to fit a correction")
+            report("not enough samples to fit a correction")
             return
         }
         guard let fx = fit(xs), let fy = fit(ys),
               (0.5...1.8).contains(fx.a), (0.5...1.8).contains(fy.a) else {
-            onLog?("pointer: measurement noisy, keeping span \(spanW)x\(spanH)")
+            report("measurement noisy, keeping span \(spanW)x\(spanH)")
             return
         }
         gainX = fx.a; offX = fx.b; gainY = fy.a; offY = fy.b
         UserDefaults.standard.set([String(gainX), String(gainY), String(offX), String(offY)], forKey: "pmap")
-        onLog?("pointer: mapping x gain \(f3(gainX)) off \(f3(offX)) / y gain \(f3(gainY)) off \(f3(offY))")
+        report("mapping x gain \(f3(gainX)) off \(f3(offX)) / y gain \(f3(gainY)) off \(f3(offY))")
         for (tx, ty) in [(0.5, 0.5), (0.22, 0.78)] as [(Double, Double)] {
             let ux = (tx * Double(spanW) - offX) / gainX
             let uy = (ty * Double(spanH) - offY) / gainY
             do {
                 let p = try await observeWithRetry(ux: Int(ux.rounded()), uy: Int(uy.rounded()))
-                onLog?("pointer: check \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
+                report("check \(f3(tx)),\(f3(ty)) -> cursor \(f3(p.x)),\(f3(p.y)) off \(f3(p.x - tx)),\(f3(p.y - ty))")
             } catch {
-                onLog?("pointer: check \(f3(tx)),\(f3(ty)) failed: \(error)")
+                report("check \(f3(tx)),\(f3(ty)) failed: \(error)")
             }
         }
     }
