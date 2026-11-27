@@ -18,6 +18,7 @@ final class VideoPipe {
     /// Chunks received from the board, for diagnostics.
     private(set) var chunks = 0
     var onLog: ((String) -> Void)?
+    private var aus = 0
     let ciContext = CIContext()
 
     func feed(_ chunk: Data, gap: Bool) {
@@ -27,6 +28,10 @@ final class VideoPipe {
     }
 
     private func handle(_ au: AU) {
+        aus += 1
+        if aus <= 3 || aus % 30 == 0 {
+            onLog?("video: AU #\(aus) \(au.data.count)B flags=\(au.flags)")
+        }
         let nals = Self.nals(au.data)
         var haveNewParams = false
         for (type, body) in nals {
@@ -61,7 +66,10 @@ final class VideoPipe {
                                                   imageBufferAttributes: attrs as CFDictionary,
                                                   outputCallback: &record,
                                                   decompressionSessionOut: &raw)
-            guard st == noErr, let s = raw else { return }
+            guard st == noErr, let s = raw else {
+                onLog?("video: decoder create failed \(st)")
+                return
+            }
             session = s
         }
         decode(au.data)
@@ -105,8 +113,9 @@ final class VideoPipe {
         guard st == noErr, let sample = sb else { return }
         let flags: VTDecodeFrameFlags = []
         var info = VTDecodeInfoFlags()
-        VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: flags,
-                                          frameRefcon: nil, infoFlagsOut: &info)
+        let dst = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: flags,
+                                                    frameRefcon: nil, infoFlagsOut: &info)
+        if dst != noErr { onLog?("video: decode failed \(dst)") }
     }
 
     /// Latest frame converted to a UIImage for display (throttle at the caller).
@@ -182,20 +191,20 @@ final class VideoPipe {
     }
 
     static func format(sps: Data, pps: Data) -> CMVideoFormatDescription? {
-        var avcc = Data([0x01, sps.count > 2 ? sps[1] : 0, sps.count > 3 ? sps[2] : 0, sps.count > 4 ? sps[3] : 0, 0xFF, 0xE1])
-        var l = UInt16(sps.count).bigEndian
-        withUnsafeBytes(of: &l) { avcc += Data($0) }
-        avcc += sps
-        avcc.append(1)
-        l = UInt16(pps.count).bigEndian
-        withUnsafeBytes(of: &l) { avcc += Data($0) }
-        avcc += pps
-        let atom: [String: Any] = ["atomType": "avcC", "atomData": avcc]
-        let extensions: [String: Any] = ["SampleDescriptionExtensionAtoms": [atom]]
         var fmt: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCMVideoCodecType_H264,
-                                       width: 0, height: 0, extensions: extensions as CFDictionary,
-                                       formatDescriptionOut: &fmt)
-        return fmt
+        let status: OSStatus = sps.withUnsafeBytes { sraw in
+            pps.withUnsafeBytes { praw in
+                guard let sp = sraw.bindMemory(to: UInt8.self).baseAddress,
+                      let pp = praw.bindMemory(to: UInt8.self).baseAddress else {
+                    return OSStatus(-1)
+                }
+                let sets: [UnsafePointer<UInt8>] = [sp, pp]
+                return CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                    allocator: kCFAllocatorDefault, parameterSetCount: 2,
+                    parameterSetPointers: sets, parameterSetSizes: [sps.count, pps.count],
+                    nalUnitHeaderLength: 4, formatDescriptionOut: &fmt)
+            }
+        }
+        return status == noErr ? fmt : nil
     }
 }
