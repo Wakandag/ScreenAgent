@@ -179,19 +179,38 @@ final class Pointer {
         }
     }
 
+    /// Wait until the decoder has produced more frames than `count`.
+    private func waitFrames(_ count: Int, timeout: TimeInterval = 4.0) async -> Bool {
+        var waited: TimeInterval = 0
+        while waited < timeout {
+            if video.frames > count, video.isFresh { return true }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            waited += 0.15
+        }
+        return false
+    }
+
     /// Park at home, move to the commanded unit offset, wiggle, and report where
-    /// the cursor actually shows up as screen fractions.
-    private func observe(ux: Int, uy: Int, wiggle: Int = 10) async throws -> (x: Double, y: Double) {
+    /// the cursor actually shows up as screen fractions. Moving the cursor is itself
+    /// a screen change, so the frames we diff come from the movement rather than
+    /// from asking a still screen for a new GOP.
+    private func observe(ux: Int, uy: Int, wiggle: Int = 12) async throws -> (x: Double, y: Double) {
+        let base = video.frames
         try await home()
         try await move(dx: ux, dy: uy)
-        try await Task.sleep(nanoseconds: 1_000_000_000)
-        let before = try await freshSnapshot()
+        guard await waitFrames(base + 1) else { throw PointerError.notFound }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        guard let before = video.graySnapshot() else { throw PointerError.notFound }
+        let mid = video.frames
         try await move(dx: wiggle, dy: 0)
-        try await Task.sleep(nanoseconds: 800_000_000)
-        let after = try await freshSnapshot()
+        guard await waitFrames(mid) else { throw PointerError.notFound }
+        try await Task.sleep(nanoseconds: 400_000_000)
+        guard let after = video.graySnapshot() else { throw PointerError.notFound }
         try await move(dx: -wiggle, dy: 0)
         guard let p = FrameDiff.locate(before: before, after: after) else { throw PointerError.notFound }
-        return (p.x - Double(wiggle) / Double(spanW), p.y)
+        // The diff contains both cursor positions, so its centroid is the midpoint
+        // of the wiggle.
+        return (p.x - Double(wiggle) / 2.0 / Double(spanW), p.y)
     }
 
     /// A link drop mid-observation shows up as a timeout; restarting from home
