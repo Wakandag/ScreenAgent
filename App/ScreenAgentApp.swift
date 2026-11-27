@@ -134,15 +134,17 @@ final class AgentViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.calibrated = self.pointer.calibrated
-                if self.quiet { return }
-                if let s = self.video.graySnapshot() {
-                    self.appendLog("video: \(s.w)x\(s.h) live")
-                } else if self.state == "session" {
-                    self.appendLog("video: no frames (\(self.video.chunks) chunks, turn on Screen Mirroring to the board)")
+                if !self.quiet {
+                    if let s = self.video.graySnapshot() {
+                        self.appendLog("video: \(s.w)x\(s.h) live")
+                    } else if self.state == "session" {
+                        self.appendLog("video: no frames (\(self.video.chunks) chunks, turn on Screen Mirroring to the board)")
+                    }
                 }
-                // Chunks arriving without a decodable frame means we lost GOP sync:
-                // 'snap' re-sends SPS/PPS plus the current GOP.
-                if self.state == "session", self.video.frames == 0, self.video.chunks > 0 {
+                // No usable frame (lost GOP sync, or a still screen makes AirPlay go
+                // quiet): 'snap' re-sends SPS/PPS plus the current GOP. This keeps
+                // running while the UI is frozen for a pointer measurement.
+                if self.state == "session", !self.video.isFresh, self.video.chunks > 0 {
                     try? self.session.sendCommand("snap")
                 }
             }
