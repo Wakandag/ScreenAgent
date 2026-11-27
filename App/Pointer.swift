@@ -25,6 +25,13 @@ final class Pointer {
             let p = raw.split(separator: "x").compactMap { Int($0) }
             if p.count == 2 { spanW = p[0]; spanH = p[1] }
         }
+        // The span is in screen units, so on this portrait screen it must be
+        // taller than it is wide. A stored span that is not was measured from
+        // noise (the app redrawing itself), so treat it as no calibration.
+        if spanW > 0, spanH > 0, spanW >= spanH {
+            spanW = 0; spanH = 0
+            UserDefaults.standard.removeObject(forKey: "span")
+        }
         if let m = UserDefaults.standard.stringArray(forKey: "pmap"), m.count == 4,
            let gx = Double(m[0]), let gy = Double(m[1]),
            let ox = Double(m[2]), let oy = Double(m[3]) {
