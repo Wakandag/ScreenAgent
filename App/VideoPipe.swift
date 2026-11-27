@@ -21,6 +21,8 @@ final class VideoPipe {
     private var aus = 0
     /// Frames handed to the screen, for diagnostics/resync.
     private(set) var frames = 0
+    /// Access units VideoToolbox rejected, for the stream resync.
+    private(set) var decodeErrors = 0
     let ciContext = CIContext()
 
     func feed(_ chunk: Data, gap: Bool) {
@@ -118,7 +120,10 @@ final class VideoPipe {
         var info = VTDecodeInfoFlags()
         let dst = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: flags,
                                                     frameRefcon: nil, infoFlagsOut: &info)
-        if dst != noErr { onLog?("video: decode failed \(dst)") }
+        if dst != noErr {
+            decodeErrors += 1
+            if decodeErrors <= 3 || decodeErrors % 20 == 0 { onLog?("video: decode failed \(dst)") }
+        }
     }
 
     /// Latest frame converted to a UIImage for display (throttle at the caller).

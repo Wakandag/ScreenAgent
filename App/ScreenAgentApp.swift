@@ -31,6 +31,7 @@ final class AgentViewModel: ObservableObject {
     private var lastPairAttempt = Date.distantPast
     private var lastOpenAttempt = Date.distantPast
     private var lastScanStart = Date.distantPast
+    private var lastDecodeErrors = 0
 
     init() {
         session.outbound = { [weak self] line in
@@ -164,6 +165,15 @@ final class AgentViewModel: ObservableObject {
                 // running while the UI is frozen for a pointer measurement.
                 if self.state == "session", !self.video.isFresh, self.video.chunks > 0 {
                     try? self.session.sendCommand("snap")
+                }
+                // Chunks arrive but every access unit is rejected: the stream started
+                // mid-GOP or lost frames, so restart it and take a fresh keyframe.
+                if self.state == "session", self.video.decodeErrors != self.lastDecodeErrors {
+                    self.lastDecodeErrors = self.video.decodeErrors
+                    try? self.session.sendCommand("stream off")
+                    try? self.session.sendCommand("stream on")
+                    try? self.session.sendCommand("snap")
+                    if !self.quiet { self.appendLog("video: resync (stream off/on + snap)") }
                 }
             }
         }
