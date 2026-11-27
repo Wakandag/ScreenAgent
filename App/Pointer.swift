@@ -151,15 +151,31 @@ final class Pointer {
 
     // MARK: Calibration
 
+    /// A static mirrored screen makes AirPlay emit almost nothing, so ask the board
+    /// for the current GOP ('snap') and wait for the decoder to hand us a frame.
+    private func freshSnapshot(timeout: TimeInterval = 2.5) async throws -> (w: Int, h: Int, data: [UInt8]) {
+        for _ in 0..<3 {
+            try? await session.sendCommand("snap")
+            var waited: TimeInterval = 0
+            while waited < timeout {
+                if let s = video.graySnapshot() { return s }
+                try await Task.sleep(nanoseconds: 200_000_000)
+                waited += 0.2
+            }
+        }
+        onLog?("calibration: no video frame")
+        throw PointerError.notFound
+    }
+
     /// One-point calibration: home, move 200 diagonal, find the cursor by wiggling + frame diff.
     func calibrate() async throws {
         try await home()
         try await move(dx: 200, dy: 200)
         try await Task.sleep(nanoseconds: 1_200_000_000)   // iOS glides the pointer over ~1 s
-        guard let before = video.graySnapshot() else { throw PointerError.notFound }
+        let before = try await freshSnapshot()
         try await move(dx: 12, dy: 0)
         try await Task.sleep(nanoseconds: 900_000_000)
-        guard let after = video.graySnapshot() else { throw PointerError.notFound }
+        let after = try await freshSnapshot()
         try await move(dx: -12, dy: 0)
         try await Task.sleep(nanoseconds: 900_000_000)
         guard let pt = FrameDiff.locate(before: before, after: after),
