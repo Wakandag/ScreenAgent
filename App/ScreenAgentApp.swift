@@ -12,6 +12,11 @@ final class AgentViewModel: ObservableObject {
     @Published var goal = "open the settings app and turn on airplane mode"
     @Published var log: [String] = []
     @Published var frameImage: UIImage?
+    /// While a pointer measurement runs the phone shows this app, so its own
+    /// redraws (log lines, status text, mirrored preview) would swamp the frame
+    /// diff. Frozen UI keeps the mirrored screen still except for the cursor.
+    @Published var quiet = false
+    private var quietBuffer: [String] = []
 
     let link = BLELink()
     let session = BoardSession()
@@ -60,6 +65,7 @@ final class AgentViewModel: ObservableObject {
                 if let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
                     let parts = j.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
                     Task { @MainActor in
+                        guard !self.quiet else { return }
                         self.boardStatus = parts
                         if let b = j["battery"] as? Int { self.battery = "\(b)%" }
                     }
@@ -72,7 +78,8 @@ final class AgentViewModel: ObservableObject {
         pointer.onLog = { [weak self] in self?.appendLog($0) }
         video.onNewFrame = { [weak self] in
             Task { @MainActor in
-                guard let self, self.frameImage == nil || Int.random(in: 0..<15) == 0 else { return }
+                guard let self, !self.quiet else { return }
+                guard self.frameImage == nil || Int.random(in: 0..<15) == 0 else { return }
                 self.frameImage = self.video.uiImage()
             }
         }
@@ -127,6 +134,7 @@ final class AgentViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.calibrated = self.pointer.calibrated
+                if self.quiet { return }
                 if let s = self.video.graySnapshot() {
                     self.appendLog("video: \(s.w)x\(s.h) live")
                 } else if self.state == "session" {
@@ -143,6 +151,10 @@ final class AgentViewModel: ObservableObject {
 
     func appendLog(_ s: String) {
         Task { @MainActor in
+            if self.quiet {
+                self.quietBuffer.append(s)
+                return
+            }
             let line = "\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)) \(s)"
             self.log.append(line)
             if self.log.count > 300 { self.log.removeFirst(self.log.count - 300) }
@@ -202,6 +214,13 @@ final class AgentViewModel: ObservableObject {
 
     func verifyPointer() {
         Task {
+            quiet = true
+            defer {
+                quiet = false
+                let buffered = quietBuffer
+                quietBuffer.removeAll()
+                for line in buffered { appendLog(line) }
+            }
             do {
                 try await pointer.verifyMapping()
             } catch {
