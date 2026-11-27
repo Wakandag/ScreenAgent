@@ -86,11 +86,13 @@ final class AgentViewModel: ObservableObject {
         loop.onLog = { [weak self] in self?.appendLog($0) }
         startStatusTimer()
         startAuto()
-        // `defaults write com.screenagent.app autoVerify -bool YES` makes the next
-        // launch run the pointer check once the link and video are up, so it can be
-        // triggered without scrolling to the button.
-        if UserDefaults.standard.bool(forKey: "autoVerify") {
-            UserDefaults.standard.removeObject(forKey: "autoVerify")
+        // Dropping a file named verify.txt into the app's Documents folder makes the
+        // next launch run the pointer check once the link and video are up, so the
+        // check can be triggered without scrolling down to the button.
+        let verifyFlag = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("verify.txt")
+        if let verifyFlag, FileManager.default.fileExists(atPath: verifyFlag.path) {
+            try? FileManager.default.removeItem(at: verifyFlag)
             Task { [weak self] in
                 guard let self else { return }
                 var waited = 0
