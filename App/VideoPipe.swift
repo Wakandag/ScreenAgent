@@ -174,9 +174,10 @@ final class VideoPipe {
         }
         var result: [(UInt8, Data)] = []
         for (n, s) in starts.enumerated() {
+            let start = s.body
             let end = n + 1 < starts.count ? starts[n + 1].body - starts[n + 1].codeLen : d.count
-            guard s < end, end <= d.count else { continue }
-            let body = Data(d[s..<end])
+            guard start < end, end <= d.count else { continue }
+            let body = Data(d[start..<end])
             guard let t = body.first else { continue }
             result.append((t & 0x1F, body.dropFirst()))
         }
